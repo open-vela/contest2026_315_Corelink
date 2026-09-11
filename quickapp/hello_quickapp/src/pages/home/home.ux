@@ -1,0 +1,424 @@
+<template>
+  <div class="page">
+    <div class="content">
+      <div class="topbar">
+        <text class="clock">{{ clockText }}</text>
+        <div class="top-status">
+          <text class="queue-chip" if="{{ pendingCount > 0 }}">待补发 {{ pendingCount }}</text>
+          <text class="network-badge {{ networkClass }}">{{ networkText }}</text>
+        </div>
+      </div>
+
+      <div class="status-card {{ statusClass }}">
+        <div class="status-head">
+          <div class="status-dot"></div>
+          <text class="status-kicker">{{ statusKicker }}</text>
+          <text class="source-chip">{{ sourceText }}</text>
+        </div>
+        <text class="status-title">{{ statusTitle }}</text>
+        <text class="status-description">{{ statusDescription }}</text>
+        <div class="metric-row">
+          <div class="metric">
+            <text class="metric-value">{{ currentG }}</text>
+            <text class="metric-label">当前 g</text>
+          </div>
+          <div class="metric">
+            <text class="metric-value">{{ peakG }}</text>
+            <text class="metric-label">峰值 g</text>
+          </div>
+          <div class="metric">
+            <text class="metric-value">{{ riskScore }}</text>
+            <text class="metric-label">可信度</text>
+          </div>
+        </div>
+      </div>
+
+      <input class="sos-button" type="button" value="立即求助 SOS" onclick="triggerSos" />
+
+      <div class="nav-row">
+        <input class="nav-button" type="button" value="场景测试" onclick="openScenarios" />
+        <input class="nav-button" type="button" value="事件历史" onclick="openHistory" />
+        <input class="nav-button" type="button" value="设置" onclick="openSettings" />
+      </div>
+
+      <text class="disclaimer">安全辅助原型 · 不用于医疗诊断</text>
+    </div>
+  </div>
+</template>
+
+<script>
+import router from "@system.router"
+import network from "@system.network"
+import sensor from "@system.sensor"
+import {createWindow, pushSample, resetWindow, assessWindow} from "../../common/fall-model.js"
+import {createAlert, createSosAlert} from "../../common/event-machine.js"
+import {countQueued, loadEvents, loadSettings} from "../../common/storage.js"
+
+function magnitude(sample) {
+  return Math.sqrt(sample.x * sample.x + sample.y * sample.y + sample.z * sample.z)
+}
+
+function pad(value) {
+  return value < 10 ? "0" + value : String(value)
+}
+
+export default {
+  private: {
+    clockText: "--:--",
+    networkText: "检测中",
+    networkClass: "network-online",
+    statusClass: "status-safe",
+    statusKicker: "端侧守护中",
+    statusTitle: "状态正常",
+    statusDescription: "未发现安全风险",
+    currentG: "1.00",
+    peakG: "1.00",
+    riskScore: "--",
+    sourceText: "模拟",
+    pendingCount: 0
+  },
+
+  onInit() {
+    this.sampleWindow = createWindow(64)
+    this.clockTimer = null
+    this.liveSampleCount = 0
+    this.liveAlertLocked = false
+  },
+
+  onShow() {
+    this.startClock()
+    this.refreshState()
+  },
+
+  onHide() {
+    this.stopClock()
+    this.stopLiveSensor()
+  },
+
+  onDestroy() {
+    this.stopClock()
+    this.stopLiveSensor()
+  },
+
+  startClock() {
+    const page = this
+    this.stopClock()
+    this.updateClock()
+    this.clockTimer = setInterval(function() {
+      page.updateClock()
+    }, 1000)
+  },
+
+  stopClock() {
+    if (this.clockTimer) {
+      clearInterval(this.clockTimer)
+      this.clockTimer = null
+    }
+  },
+
+  updateClock() {
+    const now = new Date()
+    this.clockText = pad(now.getHours()) + ":" + pad(now.getMinutes())
+  },
+
+  refreshState() {
+    const page = this
+    loadEvents(function(events) {
+      page.pendingCount = countQueued(events)
+    })
+
+    loadSettings(function(settings) {
+      page.settings = settings
+      page.sourceText = settings.useRealSensor ? "真机" : "模拟"
+      page.refreshNetwork(settings.demoOffline)
+      if (settings.useRealSensor) {
+        page.startLiveSensor()
+      } else {
+        page.stopLiveSensor()
+      }
+    })
+  },
+
+  refreshNetwork(demoOffline) {
+    const page = this
+    if (demoOffline) {
+      this.networkText = "离线"
+      this.networkClass = "network-offline"
+      return
+    }
+
+    network.getType({
+      success: function(data) {
+        if (data.type === "none") {
+          page.networkText = "离线"
+          page.networkClass = "network-offline"
+        } else {
+          page.networkText = data.type === "wifi" ? "Wi-Fi" : "联网"
+          page.networkClass = "network-online"
+        }
+      },
+      fail: function() {
+        page.networkText = "模拟联网"
+        page.networkClass = "network-online"
+      }
+    })
+  },
+
+  startLiveSensor() {
+    const page = this
+    this.stopLiveSensor()
+    resetWindow(this.sampleWindow)
+    this.liveSampleCount = 0
+    this.liveAlertLocked = false
+
+    sensor.subscribeAccelerometer({
+      interval: "game",
+      callback: function(sample) {
+        page.onLiveSample(sample)
+      },
+      fail: function() {
+        page.sourceText = "模拟"
+        page.statusDescription = "模拟器无 IMU，请使用场景测试"
+      }
+    })
+  },
+
+  stopLiveSensor() {
+    try {
+      sensor.unsubscribeAccelerometer()
+    } catch (error) {
+      console.log("unsubscribe accelerometer skipped", error)
+    }
+  },
+
+  onLiveSample(sample) {
+    if (this.liveAlertLocked) {
+      return
+    }
+
+    sample.timestamp = Date.now()
+    pushSample(this.sampleWindow, sample)
+    this.liveSampleCount += 1
+    const current = magnitude(sample)
+    this.currentG = current.toFixed(2)
+    this.peakG = Math.max(Number(this.peakG), current).toFixed(2)
+
+    if (this.liveSampleCount >= 50 && this.liveSampleCount % 10 === 0) {
+      const result = assessWindow(this.sampleWindow)
+      this.riskScore = Math.round(result.confidence * 100) + "%"
+      if (result.label !== "normal") {
+        this.liveAlertLocked = true
+        this.openAlert(createAlert(result, "真机 IMU"))
+      }
+    }
+  },
+
+  openAlert(alert) {
+    this.$app.$def.setCurrentAlert(alert)
+    router.push({
+      uri: "/pages/alert"
+    })
+  },
+
+  triggerSos() {
+    this.openAlert(createSosAlert())
+  },
+
+  openScenarios() {
+    router.push({
+      uri: "/pages/scenarios"
+    })
+  },
+
+  openHistory() {
+    router.push({
+      uri: "/pages/history"
+    })
+  },
+
+  openSettings() {
+    router.push({
+      uri: "/pages/settings"
+    })
+  }
+}
+</script>
+
+<style>
+.page {
+  width: 100%;
+  height: 100%;
+  background-color: #07100f;
+}
+
+.content {
+  width: 100%;
+  height: 100%;
+  padding: 22px 28px 20px 28px;
+  flex-direction: column;
+}
+
+.topbar {
+  width: 100%;
+  height: 42px;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.clock {
+  color: #ffffff;
+  font-size: 27px;
+  font-weight: bold;
+}
+
+.top-status {
+  align-items: center;
+}
+
+.network-badge {
+  padding: 5px 9px;
+  border-radius: 12px;
+  color: #ffffff;
+  font-size: 11px;
+}
+
+.network-online {
+  background-color: #123d31;
+}
+
+.network-offline {
+  background-color: #5a2b25;
+}
+
+.queue-chip {
+  padding: 5px 8px;
+  margin-right: 6px;
+  border-radius: 12px;
+  background-color: #49351b;
+  color: #ffd27e;
+  font-size: 10px;
+}
+
+.status-card {
+  width: 100%;
+  height: 156px;
+  margin-top: 7px;
+  padding: 15px;
+  border-radius: 22px;
+  flex-direction: column;
+}
+
+.status-safe {
+  background-color: #0d3b30;
+}
+
+.status-monitoring {
+  background-color: #173751;
+}
+
+.status-warning {
+  background-color: #632d26;
+}
+
+.status-head {
+  width: 100%;
+  align-items: center;
+}
+
+.status-dot {
+  width: 8px;
+  height: 8px;
+  margin-right: 6px;
+  border-radius: 4px;
+  background-color: #7affd4;
+}
+
+.status-kicker {
+  flex: 1;
+  color: #a7c8c0;
+  font-size: 10px;
+}
+
+.source-chip {
+  padding: 3px 7px;
+  border-radius: 9px;
+  background-color: #163f35;
+  color: #80e6bd;
+  font-size: 9px;
+}
+
+.status-title {
+  color: #ffffff;
+  font-size: 28px;
+  font-weight: bold;
+  margin-top: 3px;
+}
+
+.status-description {
+  color: #c6d8d3;
+  font-size: 12px;
+  margin-top: 1px;
+}
+
+.metric-row {
+  width: 100%;
+  margin-top: 11px;
+  justify-content: space-between;
+}
+
+.metric {
+  width: 31%;
+  height: 43px;
+  background-color: #09251f;
+  border-radius: 12px;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+}
+
+.metric-value {
+  color: #ffffff;
+  font-size: 17px;
+  font-weight: bold;
+}
+
+.metric-label {
+  color: #92aaa4;
+  font-size: 9px;
+}
+
+.sos-button {
+  width: 100%;
+  height: 50px;
+  margin-top: 12px;
+  border-radius: 25px;
+  background-color: #ff5d50;
+  color: #ffffff;
+  font-size: 16px;
+  font-weight: bold;
+}
+
+.nav-row {
+  width: 100%;
+  height: 48px;
+  margin-top: 10px;
+  justify-content: space-between;
+}
+
+.nav-button {
+  width: 31%;
+  height: 48px;
+  border-radius: 18px;
+  background-color: #172824;
+  color: #cce0da;
+  font-size: 12px;
+}
+
+.disclaimer {
+  width: 100%;
+  margin-top: 9px;
+  text-align: center;
+  color: #526762;
+  font-size: 9px;
+}
+</style>

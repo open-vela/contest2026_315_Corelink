@@ -1,0 +1,365 @@
+<template>
+  <scroll class="page" scroll-y="true">
+    <div class="content">
+      <div class="header">
+        <input class="back-button" type="button" value="‹" onclick="goBack" />
+        <div class="header-copy">
+          <text class="title">场景测试</text>
+          <text class="subtitle">端侧 IMU 可复现回放</text>
+        </div>
+        <text class="source-chip">{{ sourceText }}</text>
+      </div>
+
+      <div class="result-card {{ statusClass }}">
+        <div class="result-head">
+          <div class="status-dot"></div>
+          <text class="result-kicker">{{ statusKicker }}</text>
+        </div>
+        <text class="result-title">{{ statusTitle }}</text>
+        <text class="result-description">{{ statusDescription }}</text>
+        <div class="metric-row">
+          <div class="metric">
+            <text class="metric-value">{{ currentG }}</text>
+            <text class="metric-label">当前 g</text>
+          </div>
+          <div class="metric">
+            <text class="metric-value">{{ peakG }}</text>
+            <text class="metric-label">峰值 g</text>
+          </div>
+          <div class="metric">
+            <text class="metric-value">{{ riskScore }}</text>
+            <text class="metric-label">可信度</text>
+          </div>
+        </div>
+        <div class="progress-track" if="{{ isRunning }}">
+          <div class="progress-fill" style="width: {{ progressWidth }};"></div>
+        </div>
+      </div>
+
+      <text class="section-title">选择测试场景</text>
+      <div class="scenario-grid">
+        <div
+          class="scenario-card"
+          for="{{ scenarios }}"
+          tid="id"
+          onclick="runScenario($item.id)"
+        >
+          <text class="scenario-title">{{ $item.title }}</text>
+          <text class="scenario-subtitle">{{ $item.subtitle }}</text>
+        </div>
+      </div>
+
+      <text class="hint">测试过程中请勿重复点击；风险场景完成后会进入安全确认。</text>
+    </div>
+  </scroll>
+</template>
+
+<script>
+import router from "@system.router"
+import {createWindow, pushSample, resetWindow, assessWindow} from "../../common/fall-model.js"
+import {createReplayEngine, getScenarioCatalog} from "../../common/sensor-replay.js"
+import {createAlert} from "../../common/event-machine.js"
+import {loadSettings} from "../../common/storage.js"
+
+function magnitude(sample) {
+  return Math.sqrt(sample.x * sample.x + sample.y * sample.y + sample.z * sample.z)
+}
+
+export default {
+  private: {
+    sourceText: "模拟",
+    statusClass: "status-ready",
+    statusKicker: "准备就绪",
+    statusTitle: "选择一个场景",
+    statusDescription: "验证端侧识别与误报抑制",
+    currentG: "--",
+    peakG: "--",
+    riskScore: "--",
+    isRunning: false,
+    progressWidth: "0%",
+    scenarios: getScenarioCatalog()
+  },
+
+  onInit() {
+    const page = this
+    this.sampleWindow = createWindow(64)
+    this.replay = createReplayEngine({
+      onStart: function(definition) {
+        page.onReplayStart(definition)
+      },
+      onSample: function(sample, index, total) {
+        page.onReplaySample(sample, index, total)
+      },
+      onComplete: function(definition) {
+        page.onReplayComplete(definition)
+      }
+    })
+  },
+
+  onShow() {
+    const page = this
+    loadSettings(function(settings) {
+      page.sourceText = settings.useRealSensor ? "真机配置" : "模拟"
+    })
+  },
+
+  onDestroy() {
+    if (this.replay) {
+      this.replay.stop()
+    }
+  },
+
+  runScenario(scenarioId) {
+    if (this.isRunning) {
+      return
+    }
+    this.replay.start(scenarioId)
+  },
+
+  onReplayStart(definition) {
+    resetWindow(this.sampleWindow)
+    this.isRunning = true
+    this.progressWidth = "0%"
+    this.statusClass = "status-running"
+    this.statusKicker = "正在分析"
+    this.statusTitle = definition.title
+    this.statusDescription = "提取腕端运动特征"
+    this.currentG = "--"
+    this.peakG = "0.00"
+    this.riskScore = "--"
+  },
+
+  onReplaySample(sample, index, total) {
+    pushSample(this.sampleWindow, sample)
+    const current = magnitude(sample)
+    this.currentG = current.toFixed(2)
+    this.peakG = Math.max(Number(this.peakG), current).toFixed(2)
+    this.progressWidth = Math.round((index / total) * 100) + "%"
+  },
+
+  onReplayComplete(definition) {
+    const result = assessWindow(this.sampleWindow)
+    this.isRunning = false
+    this.progressWidth = "100%"
+    this.riskScore = Math.round(result.confidence * 100) + "%"
+
+    if (result.label === "normal") {
+      this.statusClass = "status-safe"
+      this.statusKicker = "未发现风险"
+      this.statusTitle = "状态正常"
+      this.statusDescription =
+        definition.id === "shake" ? "冲击后仍持续运动，未判定跌倒" : "运动符合日常活动模式"
+      return
+    }
+
+    this.statusClass = "status-warning"
+    this.statusKicker = "发现风险"
+    this.statusTitle = result.label === "fall" ? "疑似跌倒" : "异常静止"
+    this.statusDescription = "即将进入安全确认"
+    this.$app.$def.setCurrentAlert(createAlert(result, definition.title + "回放"))
+    router.push({
+      uri: "/pages/alert"
+    })
+  },
+
+  goBack() {
+    router.back()
+  }
+}
+</script>
+
+<style>
+.page {
+  width: 100%;
+  height: 100%;
+  background-color: #07100f;
+}
+
+.content {
+  width: 100%;
+  min-height: 100%;
+  padding: 22px 28px 30px 28px;
+  flex-direction: column;
+}
+
+.header {
+  width: 100%;
+  align-items: center;
+  margin-bottom: 12px;
+}
+
+.back-button {
+  width: 38px;
+  height: 38px;
+  margin-right: 9px;
+  border-radius: 19px;
+  background-color: #162521;
+  color: #ffffff;
+  font-size: 26px;
+}
+
+.header-copy {
+  flex: 1;
+  flex-direction: column;
+}
+
+.title {
+  color: #ffffff;
+  font-size: 23px;
+  font-weight: bold;
+}
+
+.subtitle {
+  color: #70847f;
+  font-size: 10px;
+}
+
+.source-chip {
+  padding: 5px 8px;
+  border-radius: 11px;
+  background-color: #173b31;
+  color: #83e8c2;
+  font-size: 10px;
+}
+
+.result-card {
+  width: 100%;
+  min-height: 155px;
+  padding: 15px;
+  border-radius: 22px;
+  flex-direction: column;
+}
+
+.status-ready {
+  background-color: #152521;
+}
+
+.status-running {
+  background-color: #183852;
+}
+
+.status-safe {
+  background-color: #0d3b30;
+}
+
+.status-warning {
+  background-color: #632d26;
+}
+
+.result-head {
+  width: 100%;
+  align-items: center;
+}
+
+.status-dot {
+  width: 8px;
+  height: 8px;
+  margin-right: 6px;
+  border-radius: 4px;
+  background-color: #76f0c2;
+}
+
+.result-kicker {
+  color: #a7c8c0;
+  font-size: 10px;
+}
+
+.result-title {
+  color: #ffffff;
+  font-size: 25px;
+  font-weight: bold;
+  margin-top: 3px;
+}
+
+.result-description {
+  color: #b8ccc6;
+  font-size: 11px;
+  margin-top: 2px;
+}
+
+.metric-row {
+  width: 100%;
+  margin-top: 12px;
+  justify-content: space-between;
+}
+
+.metric {
+  width: 31%;
+  height: 43px;
+  border-radius: 12px;
+  background-color: #09251f;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+}
+
+.metric-value {
+  color: #ffffff;
+  font-size: 16px;
+  font-weight: bold;
+}
+
+.metric-label {
+  color: #8ea69f;
+  font-size: 9px;
+}
+
+.progress-track {
+  width: 100%;
+  height: 4px;
+  margin-top: 10px;
+  border-radius: 2px;
+  background-color: #24443d;
+}
+
+.progress-fill {
+  height: 4px;
+  border-radius: 2px;
+  background-color: #6dffcd;
+}
+
+.section-title {
+  color: #ffffff;
+  font-size: 17px;
+  font-weight: bold;
+  margin-top: 16px;
+  margin-bottom: 9px;
+}
+
+.scenario-grid {
+  width: 100%;
+  flex-wrap: wrap;
+  justify-content: space-between;
+}
+
+.scenario-card {
+  width: 48%;
+  min-height: 66px;
+  padding: 11px;
+  margin-bottom: 9px;
+  border-radius: 17px;
+  background-color: #111f1d;
+  flex-direction: column;
+  justify-content: center;
+}
+
+.scenario-title {
+  color: #ffffff;
+  font-size: 14px;
+  font-weight: bold;
+}
+
+.scenario-subtitle {
+  color: #77908a;
+  font-size: 9px;
+  margin-top: 2px;
+}
+
+.hint {
+  width: 100%;
+  color: #5d746e;
+  font-size: 9px;
+  text-align: center;
+  margin-top: 4px;
+}
+</style>

@@ -1,0 +1,436 @@
+<template>
+  <div class="page">
+    <div class="header">
+      <input class="back-button" type="button" value="‹" onclick="goBack" />
+      <div class="header-title-block">
+        <text class="title">事件历史</text>
+        <text class="subtitle">本地留痕 · 最多保留 30 条</text>
+      </div>
+      <input class="clear-button" type="button" value="清空" onclick="clearAll" />
+    </div>
+
+    <div class="summary-row">
+      <div class="summary-card" onclick="openAllEvents">
+        <text class="summary-value">{{ totalCount }}</text>
+        <text class="summary-label">全部事件</text>
+      </div>
+      <div class="summary-card warning-card">
+        <text class="summary-value">{{ queuedCount }}</text>
+        <text class="summary-label">等待补发</text>
+      </div>
+    </div>
+
+    <div class="empty-state" if="{{ events.length === 0 }}">
+      <text class="empty-icon">✓</text>
+      <text class="empty-title">暂无安全事件</text>
+      <text class="empty-note">从首页运行场景实验后，处理结果会保存在这里</text>
+    </div>
+
+    <list class="event-list" else>
+      <list-item
+        class="event-card"
+        type="event"
+        for="{{ events }}"
+        tid="id"
+        onclick="openDetail($item.id)"
+      >
+        <div class="event-top">
+          <div class="event-icon {{ $item.iconClass }}">
+            <text class="event-icon-text">{{ $item.icon }}</text>
+          </div>
+          <div class="event-copy">
+            <text class="event-sequence">{{ $item.sequenceLabel }}</text>
+            <text class="event-title">{{ $item.typeLabel }}</text>
+            <text class="event-time">{{ $item.fullTimeLabel }}</text>
+          </div>
+        </div>
+        <div class="event-result-row">
+          <div class="event-result-copy">
+            <text class="event-result">{{ $item.resultLabel }}</text>
+            <text class="event-source">来源：{{ $item.source }}</text>
+          </div>
+          <text class="event-status {{ $item.statusClass }}">{{ $item.statusLabel }}</text>
+        </div>
+        <div class="event-meta">
+          <text class="event-meta-text">可信度 {{ $item.confidence }}%</text>
+          <text class="event-meta-text">峰值 {{ $item.peakG }}g</text>
+          <text class="event-open">查看详情 ›</text>
+        </div>
+      </list-item>
+    </list>
+  </div>
+</template>
+
+<script>
+import router from "@system.router"
+import {clearEvents, countQueued, loadEvents} from "../../common/storage.js"
+
+function pad(value) {
+  return value < 10 ? "0" + value : String(value)
+}
+
+function fullTimeLabel(event) {
+  if (!event.createdAt) {
+    return event.timeLabel
+  }
+  const date = new Date(event.createdAt)
+  return (
+    date.getFullYear() +
+    "-" +
+    pad(date.getMonth() + 1) +
+    "-" +
+    pad(date.getDate()) +
+    " " +
+    pad(date.getHours()) +
+    ":" +
+    pad(date.getMinutes()) +
+    ":" +
+    pad(date.getSeconds())
+  )
+}
+
+function decorate(event) {
+  const item = event
+  if (event.status === "cancelled") {
+    item.icon = "✓"
+    item.iconClass = "icon-safe"
+    item.statusClass = "status-safe"
+  } else if (event.status === "queued") {
+    item.icon = "!"
+    item.iconClass = "icon-queued"
+    item.statusClass = "status-queued"
+  } else if (event.status === "withdrawal_queued") {
+    item.icon = "↶"
+    item.iconClass = "icon-queued"
+    item.statusClass = "status-queued"
+  } else if (event.status === "withdrawn") {
+    item.icon = "✓"
+    item.iconClass = "icon-withdrawn"
+    item.statusClass = "status-withdrawn"
+  } else {
+    item.icon = "↑"
+    item.iconClass = "icon-sent"
+    item.statusClass = "status-sent"
+  }
+  return item
+}
+
+export default {
+  private: {
+    events: [],
+    totalCount: 0,
+    queuedCount: 0
+  },
+
+  openDetail(eventId) {
+    for (let index = 0; index < this.events.length; index += 1) {
+      if (this.events[index].id === eventId) {
+        this.$app.$def.setCurrentEvent(this.events[index])
+        router.push({
+          uri: "/pages/event-detail"
+        })
+        return
+      }
+    }
+  },
+
+  openAllEvents() {
+    router.push({
+      uri: "/pages/all-events"
+    })
+  },
+
+  onShow() {
+    this.reload()
+  },
+
+  reload() {
+    const page = this
+    loadEvents(function(events) {
+      const decorated = []
+      for (let index = 0; index < events.length; index += 1) {
+        const item = decorate(events[index])
+        item.sequenceLabel = "事件 #" + (events.length - index)
+        item.fullTimeLabel = fullTimeLabel(item)
+        decorated.push(item)
+      }
+      page.events = decorated
+      page.totalCount = decorated.length
+      page.queuedCount = countQueued(decorated)
+    })
+  },
+
+  clearAll() {
+    const page = this
+    clearEvents(function() {
+      page.events = []
+      page.totalCount = 0
+      page.queuedCount = 0
+    })
+  },
+
+  goBack() {
+    router.back()
+  }
+}
+</script>
+
+<style>
+.page {
+  width: 100%;
+  height: 100%;
+  padding: 26px 22px;
+  background-color: #08110f;
+  flex-direction: column;
+}
+
+.header {
+  width: 100%;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.back-button {
+  width: 44px;
+  height: 44px;
+  border-radius: 22px;
+  background-color: #162521;
+  color: #ffffff;
+  font-size: 30px;
+}
+
+.header-title-block {
+  flex: 1;
+  flex-direction: column;
+  align-items: center;
+}
+
+.title {
+  color: #ffffff;
+  font-size: 25px;
+  font-weight: bold;
+}
+
+.subtitle {
+  color: #70847f;
+  font-size: 11px;
+}
+
+.clear-button {
+  width: 58px;
+  height: 38px;
+  border-radius: 19px;
+  background-color: #2e1e1b;
+  color: #ff958a;
+  font-size: 13px;
+}
+
+.summary-row {
+  width: 100%;
+  justify-content: space-between;
+  margin-top: 20px;
+}
+
+.summary-card {
+  width: 48%;
+  height: 78px;
+  padding: 12px 15px;
+  border-radius: 18px;
+  background-color: #112a24;
+  flex-direction: column;
+}
+
+.warning-card {
+  background-color: #372817;
+}
+
+.summary-value {
+  color: #ffffff;
+  font-size: 27px;
+  font-weight: bold;
+}
+
+.summary-label {
+  color: #8da29c;
+  font-size: 12px;
+}
+
+.empty-state {
+  width: 100%;
+  flex: 1;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+}
+
+.empty-icon {
+  width: 72px;
+  height: 72px;
+  border-radius: 36px;
+  background-color: #123a2f;
+  color: #6ff4c2;
+  font-size: 40px;
+  text-align: center;
+}
+
+.empty-title {
+  color: #ffffff;
+  font-size: 21px;
+  font-weight: bold;
+  margin-top: 16px;
+}
+
+.empty-note {
+  width: 82%;
+  color: #6f817d;
+  font-size: 13px;
+  text-align: center;
+  margin-top: 6px;
+}
+
+.event-list {
+  width: 100%;
+  flex: 1;
+  margin-top: 16px;
+}
+
+.event-card {
+  width: 100%;
+  min-height: 150px;
+  padding: 13px;
+  margin-bottom: 10px;
+  border-radius: 18px;
+  background-color: #111f1c;
+  flex-direction: column;
+  flex-shrink: 0;
+}
+
+.event-top {
+  width: 100%;
+  align-items: center;
+}
+
+.event-icon {
+  width: 42px;
+  height: 42px;
+  border-radius: 21px;
+  justify-content: center;
+  align-items: center;
+}
+
+.icon-safe {
+  background-color: #154333;
+}
+
+.icon-queued {
+  background-color: #593e1b;
+}
+
+.icon-sent {
+  background-color: #173850;
+}
+
+.icon-withdrawn {
+  background-color: #3c3153;
+}
+
+.event-icon-text {
+  color: #ffffff;
+  font-size: 21px;
+  font-weight: bold;
+}
+
+.event-copy {
+  flex: 1;
+  margin-left: 11px;
+  flex-direction: column;
+}
+
+.event-sequence {
+  color: #5f7f75;
+  font-size: 9px;
+}
+
+.event-title {
+  width: 100%;
+  color: #ffffff;
+  font-size: 17px;
+  font-weight: bold;
+}
+
+.event-time {
+  width: 100%;
+  color: #70847f;
+  font-size: 11px;
+  margin-top: 2px;
+}
+
+.event-result-row {
+  width: 100%;
+  margin-top: 10px;
+  align-items: center;
+}
+
+.event-result-copy {
+  flex: 1;
+  margin-right: 8px;
+  flex-direction: column;
+}
+
+.event-result {
+  width: 100%;
+  color: #b2c3be;
+  font-size: 12px;
+}
+
+.event-source {
+  width: 100%;
+  color: #667b75;
+  font-size: 10px;
+  margin-top: 3px;
+}
+
+.event-status {
+  padding: 4px 7px;
+  border-radius: 10px;
+  font-size: 10px;
+}
+
+.status-safe {
+  color: #78e9bd;
+  background-color: #18382f;
+}
+
+.status-queued {
+  color: #ffd07a;
+  background-color: #45341d;
+}
+
+.status-sent {
+  color: #81cfff;
+  background-color: #173146;
+}
+
+.status-withdrawn {
+  color: #d0b7ff;
+  background-color: #352b49;
+}
+
+.event-meta {
+  width: 100%;
+  justify-content: space-between;
+  margin-top: 10px;
+  padding-top: 8px;
+  border-top: 1px solid #24332f;
+}
+
+.event-meta-text {
+  color: #60736e;
+  font-size: 10px;
+}
+
+.event-open {
+  color: #69deb4;
+  font-size: 10px;
+}
+</style>
