@@ -1,0 +1,343 @@
+<template>
+  <scroll class="page" scroll-y="true">
+    <div class="content">
+      <div class="header">
+        <input class="back-button" type="button" value="‹" onclick="goBack" />
+        <div class="header-copy">
+          <text class="title">演示设置</text>
+          <text class="subtitle">控制数据源与联网状态</text>
+        </div>
+      </div>
+
+      <div class="setting-card">
+        <div class="setting-head">
+          <div class="setting-copy">
+            <text class="setting-title">网络故障注入</text>
+            <text class="setting-note">验证离线队列和恢复补发</text>
+          </div>
+          <text class="state-chip {{ networkStateClass }}">{{ networkStateText }}</text>
+        </div>
+        <input
+          class="action-button"
+          type="button"
+          value="{{ networkActionText }}"
+          onclick="toggleOffline"
+        />
+      </div>
+
+      <div class="setting-card">
+        <div class="setting-head">
+          <div class="setting-copy">
+            <text class="setting-title">紧急联系人</text>
+            <text class="setting-note">配置两级通知顺序和脱敏联系方式</text>
+          </div>
+          <text class="state-chip contact-chip">P1 / P2</text>
+        </div>
+        <input
+          class="action-button contact-button"
+          type="button"
+          value="管理紧急联系人"
+          onclick="openContacts"
+        />
+      </div>
+
+      <div class="setting-card">
+        <div class="setting-head">
+          <div class="setting-copy">
+            <text class="setting-title">IMU 数据源</text>
+            <text class="setting-note">模拟器建议使用可复现回放</text>
+          </div>
+          <text class="state-chip source-chip">{{ sourceStateText }}</text>
+        </div>
+        <input
+          class="action-button secondary-button"
+          type="button"
+          value="{{ sourceActionText }}"
+          onclick="toggleSensor"
+        />
+      </div>
+
+      <div class="delivery-card" if="{{ lastFlushCount > 0 }}">
+        <text class="delivery-value">{{ lastFlushCount }}</text>
+        <div>
+          <text class="delivery-title">条离线求助已补发</text>
+          <text class="delivery-note">事件历史中已标记为“已补发”</text>
+        </div>
+      </div>
+
+      <div class="explain-card">
+        <text class="explain-title">推荐答辩演示顺序</text>
+        <text class="explain-item">1. 跑步与剧烈晃动：证明不会轻易误报</text>
+        <text class="explain-item">2. 打开离线模式，再运行疑似跌倒</text>
+        <text class="explain-item">3. 倒计时结束，事件进入待发送队列</text>
+        <text class="explain-item">4. 恢复联网，展示自动补发和本地留痕</text>
+      </div>
+
+      <text class="footer">模拟开关只服务于比赛演示，不代表真实设备网络状态。</text>
+    </div>
+  </scroll>
+</template>
+
+<script>
+import router from "@system.router"
+import {flushQueuedEvents, loadSettings, saveSettings} from "../../common/storage.js"
+
+export default {
+  private: {
+    demoOffline: false,
+    useRealSensor: false,
+    networkStateText: "联网",
+    networkStateClass: "state-online",
+    networkActionText: "切换为离线演示",
+    sourceStateText: "回放",
+    sourceActionText: "尝试使用真机 IMU",
+    lastFlushCount: 0
+  },
+
+  onShow() {
+    const page = this
+    loadSettings(function(settings) {
+      page.demoOffline = settings.demoOffline
+      page.useRealSensor = settings.useRealSensor
+      page.refreshLabels()
+    })
+  },
+
+  refreshLabels() {
+    this.networkStateText = this.demoOffline ? "离线" : "联网"
+    this.networkStateClass = this.demoOffline ? "state-offline" : "state-online"
+    this.networkActionText = this.demoOffline ? "恢复联网并补发" : "切换为离线演示"
+    this.sourceStateText = this.useRealSensor ? "真机 IMU" : "回放"
+    this.sourceActionText = this.useRealSensor ? "切换为演示回放" : "尝试使用真机 IMU"
+  },
+
+  persist(callback) {
+    saveSettings(
+      {
+        demoOffline: this.demoOffline,
+        useRealSensor: this.useRealSensor
+      },
+      callback
+    )
+  },
+
+  toggleOffline() {
+    const page = this
+    this.demoOffline = !this.demoOffline
+    this.refreshLabels()
+    this.persist(function() {
+      if (!page.demoOffline) {
+        flushQueuedEvents(function(count) {
+          page.lastFlushCount = count
+        })
+      }
+    })
+  },
+
+  toggleSensor() {
+    this.useRealSensor = !this.useRealSensor
+    this.refreshLabels()
+    this.persist()
+  },
+
+  openContacts() {
+    router.push({
+      uri: "/pages/contacts"
+    })
+  },
+
+  goBack() {
+    router.back()
+  }
+}
+</script>
+
+<style>
+.page {
+  width: 100%;
+  height: 100%;
+  background-color: #08110f;
+}
+
+.content {
+  width: 100%;
+  min-height: 100%;
+  padding: 28px 24px 34px 24px;
+  flex-direction: column;
+  flex-shrink: 0;
+}
+
+.header {
+  width: 100%;
+  align-items: center;
+  margin-bottom: 22px;
+  flex-shrink: 0;
+}
+
+.header-copy {
+  flex: 1;
+  flex-direction: column;
+}
+
+.back-button {
+  width: 44px;
+  height: 44px;
+  margin-right: 14px;
+  border-radius: 22px;
+  background-color: #162521;
+  color: #ffffff;
+  font-size: 30px;
+}
+
+.title {
+  color: #ffffff;
+  font-size: 27px;
+  font-weight: bold;
+}
+
+.subtitle {
+  color: #70847f;
+  font-size: 12px;
+}
+
+.setting-card {
+  width: 100%;
+  padding: 18px;
+  margin-bottom: 14px;
+  border-radius: 22px;
+  background-color: #111f1c;
+  flex-direction: column;
+  flex-shrink: 0;
+}
+
+.setting-head {
+  width: 100%;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.setting-copy {
+  flex: 1;
+  margin-right: 8px;
+  flex-direction: column;
+}
+
+.setting-title {
+  color: #ffffff;
+  font-size: 18px;
+  font-weight: bold;
+}
+
+.setting-note {
+  color: #748782;
+  font-size: 11px;
+  margin-top: 2px;
+}
+
+.state-chip {
+  padding: 5px 10px;
+  border-radius: 13px;
+  font-size: 11px;
+}
+
+.state-online {
+  color: #77e9bd;
+  background-color: #18392f;
+}
+
+.state-offline {
+  color: #ff9d8c;
+  background-color: #44251f;
+}
+
+.source-chip {
+  color: #83caff;
+  background-color: #162f43;
+}
+
+.contact-chip {
+  color: #e0bdff;
+  background-color: #382c46;
+}
+
+.action-button {
+  width: 100%;
+  height: 46px;
+  margin-top: 16px;
+  border-radius: 23px;
+  background-color: #64e9b8;
+  color: #082019;
+  font-size: 15px;
+  font-weight: bold;
+}
+
+.secondary-button {
+  background-color: #1e3a34;
+  color: #b9d5cc;
+}
+
+.contact-button {
+  background-color: #342943;
+  color: #dfc8f4;
+}
+
+.delivery-card {
+  width: 100%;
+  padding: 15px;
+  margin-bottom: 14px;
+  border-radius: 20px;
+  background-color: #173449;
+  align-items: center;
+  flex-shrink: 0;
+}
+
+.delivery-value {
+  color: #7fd0ff;
+  font-size: 34px;
+  font-weight: bold;
+  margin-right: 13px;
+}
+
+.delivery-title {
+  color: #ffffff;
+  font-size: 16px;
+  font-weight: bold;
+}
+
+.delivery-note {
+  color: #83a9bf;
+  font-size: 11px;
+}
+
+.explain-card {
+  width: 100%;
+  padding: 18px;
+  margin-top: 4px;
+  border-radius: 22px;
+  background-color: #10241f;
+  flex-direction: column;
+  flex-shrink: 0;
+}
+
+.explain-title {
+  color: #72efc0;
+  font-size: 17px;
+  font-weight: bold;
+  margin-bottom: 9px;
+}
+
+.explain-item {
+  color: #b6c8c3;
+  font-size: 12px;
+  margin-top: 7px;
+}
+
+.footer {
+  width: 100%;
+  color: #586a66;
+  font-size: 10px;
+  text-align: center;
+  margin-top: 20px;
+  flex-shrink: 0;
+}
+</style>

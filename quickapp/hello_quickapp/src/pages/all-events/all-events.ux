@@ -1,0 +1,313 @@
+<template>
+  <scroll class="page" scroll-y="true">
+    <div class="content">
+      <div class="header">
+        <input class="back-button" type="button" value="‹" onclick="goBack" />
+        <div class="header-copy">
+          <text class="title">全部事件</text>
+          <text class="subtitle">共 {{ totalCount }} 条 · 点击查看完整详情</text>
+        </div>
+      </div>
+
+      <div class="empty-state" if="{{ events.length === 0 }}">
+        <text class="empty-title">暂无安全事件</text>
+        <text class="empty-note">完成场景测试或 SOS 处置后，事件会保存在这里。</text>
+      </div>
+
+      <div
+        class="event-card"
+        for="{{ events }}"
+        tid="id"
+        onclick="openDetail($item.id)"
+      >
+        <div class="event-heading">
+          <div class="event-index">
+            <text class="event-index-text">{{ $item.sequence }}</text>
+          </div>
+          <div class="event-copy">
+            <text class="event-title">{{ $item.typeLabel }}</text>
+            <text class="event-time">{{ $item.fullTimeLabel }}</text>
+          </div>
+          <text class="event-status {{ $item.statusClass }}">{{ $item.statusLabel }}</text>
+        </div>
+
+        <text class="event-result">{{ $item.resultLabel }}</text>
+        <text class="event-source">来源：{{ $item.source }}</text>
+
+        <div class="event-footer">
+          <text class="event-meta">可信度 {{ $item.confidence }}%</text>
+          <text class="event-meta">峰值 {{ $item.peakG }}g</text>
+          <text class="event-open">查看详情 ›</text>
+        </div>
+      </div>
+    </div>
+  </scroll>
+</template>
+
+<script>
+import router from "@system.router"
+import {loadEvents} from "../../common/storage.js"
+
+function pad(value) {
+  return value < 10 ? "0" + value : String(value)
+}
+
+function fullTimeLabel(event) {
+  if (!event.createdAt) {
+    return event.timeLabel
+  }
+  const date = new Date(event.createdAt)
+  return (
+    date.getFullYear() +
+    "-" +
+    pad(date.getMonth() + 1) +
+    "-" +
+    pad(date.getDate()) +
+    " " +
+    pad(date.getHours()) +
+    ":" +
+    pad(date.getMinutes()) +
+    ":" +
+    pad(date.getSeconds())
+  )
+}
+
+function statusClassFor(status) {
+  if (status === "queued" || status === "withdrawal_queued") {
+    return "status-queued"
+  }
+  if (status === "withdrawn") {
+    return "status-withdrawn"
+  }
+  if (status === "cancelled") {
+    return "status-safe"
+  }
+  return "status-sent"
+}
+
+export default {
+  private: {
+    events: [],
+    totalCount: 0
+  },
+
+  onShow() {
+    const page = this
+    loadEvents(function(events) {
+      const displayed = []
+      for (let index = 0; index < events.length; index += 1) {
+        const event = events[index]
+        event.sequence = events.length - index
+        event.fullTimeLabel = fullTimeLabel(event)
+        event.statusClass = statusClassFor(event.status)
+        displayed.push(event)
+      }
+      page.events = displayed
+      page.totalCount = displayed.length
+    })
+  },
+
+  openDetail(eventId) {
+    for (let index = 0; index < this.events.length; index += 1) {
+      if (this.events[index].id === eventId) {
+        this.$app.$def.setCurrentEvent(this.events[index])
+        router.push({
+          uri: "/pages/event-detail"
+        })
+        return
+      }
+    }
+  },
+
+  goBack() {
+    router.back()
+  }
+}
+</script>
+
+<style>
+.page {
+  width: 100%;
+  height: 100%;
+  background-color: #08110f;
+}
+
+.content {
+  width: 100%;
+  min-height: 100%;
+  padding: 26px 24px 34px 24px;
+  flex-direction: column;
+  flex-shrink: 0;
+}
+
+.header {
+  width: 100%;
+  height: 48px;
+  align-items: center;
+  margin-bottom: 16px;
+  flex-shrink: 0;
+}
+
+.back-button {
+  width: 44px;
+  height: 44px;
+  margin-right: 12px;
+  border-radius: 22px;
+  background-color: #162521;
+  color: #ffffff;
+  font-size: 30px;
+}
+
+.header-copy {
+  flex: 1;
+  flex-direction: column;
+}
+
+.title {
+  width: 100%;
+  color: #ffffff;
+  font-size: 25px;
+  font-weight: bold;
+}
+
+.subtitle {
+  width: 100%;
+  color: #70847f;
+  font-size: 10px;
+}
+
+.empty-state {
+  width: 100%;
+  min-height: 260px;
+  border-radius: 22px;
+  background-color: #101d1a;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  flex-shrink: 0;
+}
+
+.empty-title {
+  color: #ffffff;
+  font-size: 20px;
+  font-weight: bold;
+}
+
+.empty-note {
+  width: 78%;
+  margin-top: 7px;
+  color: #6f817d;
+  font-size: 11px;
+  text-align: center;
+}
+
+.event-card {
+  width: 100%;
+  min-height: 148px;
+  padding: 14px;
+  margin-bottom: 11px;
+  border-radius: 20px;
+  background-color: #111f1c;
+  flex-direction: column;
+  flex-shrink: 0;
+}
+
+.event-heading {
+  width: 100%;
+  align-items: center;
+}
+
+.event-index {
+  width: 38px;
+  height: 38px;
+  margin-right: 10px;
+  border-radius: 19px;
+  background-color: #174438;
+  justify-content: center;
+  align-items: center;
+}
+
+.event-index-text {
+  color: #77e9bd;
+  font-size: 15px;
+  font-weight: bold;
+}
+
+.event-copy {
+  flex: 1;
+  margin-right: 8px;
+  flex-direction: column;
+}
+
+.event-title {
+  width: 100%;
+  color: #ffffff;
+  font-size: 17px;
+  font-weight: bold;
+}
+
+.event-time {
+  width: 100%;
+  color: #70847f;
+  font-size: 10px;
+  margin-top: 2px;
+}
+
+.event-status {
+  padding: 4px 7px;
+  border-radius: 10px;
+  font-size: 9px;
+}
+
+.status-safe {
+  color: #78e9bd;
+  background-color: #18382f;
+}
+
+.status-queued {
+  color: #ffd07a;
+  background-color: #45341d;
+}
+
+.status-sent {
+  color: #81cfff;
+  background-color: #173146;
+}
+
+.status-withdrawn {
+  color: #d0b7ff;
+  background-color: #352b49;
+}
+
+.event-result {
+  width: 100%;
+  margin-top: 11px;
+  color: #bdcec9;
+  font-size: 12px;
+}
+
+.event-source {
+  width: 100%;
+  margin-top: 3px;
+  color: #667b75;
+  font-size: 10px;
+}
+
+.event-footer {
+  width: 100%;
+  margin-top: 10px;
+  padding-top: 8px;
+  border-top: 1px solid #24332f;
+  justify-content: space-between;
+}
+
+.event-meta {
+  color: #60736e;
+  font-size: 9px;
+}
+
+.event-open {
+  color: #69deb4;
+  font-size: 10px;
+}
+</style>
